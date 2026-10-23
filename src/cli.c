@@ -45,6 +45,8 @@ int main(int argc, char **argv)
 	if (i >= argc)
 		return usage();
 	const char *message = argv[i++];
+	if (!sdiag_init())
+		return 255;
 	int r = sdiag_show(title, message, (const char **)(argv + i), argc - i, icon);
 	return r < 0 ? 255 : r;
 }

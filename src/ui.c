@@ -13,8 +13,6 @@ enum
 	T_THUMB
 };
 
-static diag_ctx_t g_ctx;
-
 static int imin(int a, int b) { return a < b ? a : b; }
 static int imax(int a, int b) { return a > b ? a : b; }
 
@@ -23,19 +21,19 @@ static int empty(rect_t r) { return r.x0 >= r.x1 || r.y0 >= r.y1; }
 static int isect(rect_t a, rect_t b) { return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; }
 static rect_t clipto(rect_t a, rect_t b) { return (rect_t){imax(a.x0, b.x0), imax(a.y0, b.y0), imin(a.x1, b.x1), imin(a.y1, b.y1)}; }
 
-static void mark(rect_t r)
+static void mark(diag_ctx_t *ctx, rect_t r)
 {
 	if (empty(r))
 		return;
-	if (empty(g_ctx.dirty))
-		g_ctx.dirty = r;
+	if (empty(ctx->dirty))
+		ctx->dirty = r;
 	else
-		g_ctx.dirty = (rect_t){imin(g_ctx.dirty.x0, r.x0), imin(g_ctx.dirty.y0, r.y0), imax(g_ctx.dirty.x1, r.x1), imax(g_ctx.dirty.y1, r.y1)};
+		ctx->dirty = (rect_t){imin(ctx->dirty.x0, r.x0), imin(ctx->dirty.y0, r.y0), imax(ctx->dirty.x1, r.x1), imax(ctx->dirty.y1, r.y1)};
 }
 
-static rect_t title_r(void) { return (rect_t){0, 0, g_ctx.W, TITLE_H}; }
-static rect_t body_r(void) { return (rect_t){0, TITLE_H, g_ctx.W, g_ctx.H - BOTTOM_H}; }
-static rect_t bottom_r(void) { return (rect_t){0, g_ctx.H - BOTTOM_H, g_ctx.W, g_ctx.H}; }
+static rect_t title_r(diag_ctx_t *ctx) { return (rect_t){0, 0, ctx->W, TITLE_H}; }
+static rect_t body_r(diag_ctx_t *ctx) { return (rect_t){0, TITLE_H, ctx->W, ctx->H - BOTTOM_H}; }
+static rect_t bottom_r(diag_ctx_t *ctx) { return (rect_t){0, ctx->H - BOTTOM_H, ctx->W, ctx->H}; }
 
 static uint32_t u8next(const char **pp)
 {
@@ -112,27 +110,27 @@ static uint32_t *decode(const char *s, int *n)
 	return o;
 }
 
-static int btn_w(int i) { return imax(BTN_MIN_W, 2 * BTN_PAD_X + g_ctx.bcells[i] * FONT_W); }
+static int btn_w(diag_ctx_t *ctx, int i) { return imax(BTN_MIN_W, 2 * BTN_PAD_X + ctx->bcells[i] * FONT_W); }
 
-static int btn_row(void)
+static int btn_row(diag_ctx_t *ctx)
 {
 	int w = 2 * BTN_MARGIN;
-	for (int i = 0; i < g_ctx.nbtn; i++)
-		w += btn_w(i) + (i ? BTN_GAP : 0);
+	for (int i = 0; i < ctx->nbtn; i++)
+		w += btn_w(ctx, i) + (i ? BTN_GAP : 0);
 	return w;
 }
 
-static void wrap(int maxcols)
+static void wrap(diag_ctx_t *ctx, int maxcols)
 {
-	const uint32_t *c = g_ctx.cps;
-	int i = 0, n = g_ctx.ncps;
-	g_ctx.nlines = 0;
-	g_ctx.nshown = n;
+	const uint32_t *c = ctx->cps;
+	int i = 0, n = ctx->ncps;
+	ctx->nlines = 0;
+	ctx->nshown = n;
 	do
 	{
-		if (g_ctx.nlines == MAX_LINES)
+		if (ctx->nlines == MAX_LINES)
 		{
-			g_ctx.nshown = i;
+			ctx->nshown = i;
 			break;
 		}
 		int start = i, col = 0, brk = start;
@@ -157,109 +155,109 @@ static void wrap(int maxcols)
 			ln.nl = 1;
 			i++;
 		}
-		g_ctx.lines[g_ctx.nlines++] = ln;
+		ctx->lines[ctx->nlines++] = ln;
 	} while (i < n);
 }
 
-static int sel_lo(void) { return imin(g_ctx.sel_a, g_ctx.sel_b); }
-static int sel_hi(void) { return imax(g_ctx.sel_a, g_ctx.sel_b); }
+static int sel_lo(diag_ctx_t *ctx) { return imin(ctx->sel_a, ctx->sel_b); }
+static int sel_hi(diag_ctx_t *ctx) { return imax(ctx->sel_a, ctx->sel_b); }
 
-static int line_of(int idx)
+static int line_of(diag_ctx_t *ctx, int idx)
 {
-	int i = g_ctx.nlines - 1;
-	while (i > 0 && g_ctx.lines[i].start > idx)
+	int i = ctx->nlines - 1;
+	while (i > 0 && ctx->lines[i].start > idx)
 		i--;
 	return i;
 }
 
-static rect_t line_rect(int i)
+static rect_t line_rect(diag_ctx_t *ctx, int i)
 {
-	int y = TITLE_H + TEXT_Y + i * LINE_H - g_ctx.scroll;
-	return clipto((rect_t){TEXT_X, y, TEXT_X + g_ctx.body_sprite.width, y + LINE_H}, body_r());
+	int y = TITLE_H + TEXT_Y + i * LINE_H - ctx->scroll;
+	return clipto((rect_t){TEXT_X, y, TEXT_X + ctx->body_sprite.width, y + LINE_H}, body_r(ctx));
 }
 
-static void render_line(int i)
+static void render_line(diag_ctx_t *ctx, int i)
 {
-	const line_t *ln = &g_ctx.lines[i];
-	int lo = sel_lo(), hi = sel_hi(), n = ln->end - ln->start;
-	paint_target(&g_ctx.body_sprite);
-	paint_text_sel(g_ctx.cps + ln->start, n, 0, i * LINE_H, lo - ln->start, hi - ln->start, g_ctx.body_sprite.width);
-	if (ln->nl && ln->end >= lo && ln->end < hi && n < g_ctx.cols)
-		paint_fill((rect_t){n * FONT_W, i * LINE_H, (n + 1) * FONT_W, (i + 1) * LINE_H}, g_bg_sel_color);
+	const line_t *ln = &ctx->lines[i];
+	int lo = sel_lo(ctx), hi = sel_hi(ctx), n = ln->end - ln->start;
+	paint_target(&ctx->paint, &ctx->body_sprite);
+	paint_text_sel(&ctx->paint, ctx->cps + ln->start, n, 0, i * LINE_H, lo - ln->start, hi - ln->start, ctx->body_sprite.width);
+	if (ln->nl && ln->end >= lo && ln->end < hi && n < ctx->cols)
+		paint_fill(&ctx->paint, (rect_t){n * FONT_W, i * LINE_H, (n + 1) * FONT_W, (i + 1) * LINE_H}, g_bg_sel_color);
 }
 
-static void set_sel(int a, int b)
+static void set_sel(diag_ctx_t *ctx, int a, int b)
 {
-	int olo = sel_lo(), ohi = sel_hi();
-	g_ctx.sel_a = a;
-	g_ctx.sel_b = b;
-	if (olo == sel_lo() && ohi == sel_hi())
+	int olo = sel_lo(ctx), ohi = sel_hi(ctx);
+	ctx->sel_a = a;
+	ctx->sel_b = b;
+	if (olo == sel_lo(ctx) && ohi == sel_hi(ctx))
 		return;
-	int l0 = line_of(imin(olo, sel_lo())), l1 = line_of(imax(ohi, sel_hi()));
+	int l0 = line_of(ctx, imin(olo, sel_lo(ctx))), l1 = line_of(ctx, imax(ohi, sel_hi(ctx)));
 	for (int i = l0; i <= l1; i++)
 	{
-		render_line(i);
-		mark(line_rect(i));
+		render_line(ctx, i);
+		mark(ctx, line_rect(ctx, i));
 	}
 }
 
-static void layout_buttons(void)
+static void layout_buttons(diag_ctx_t *ctx)
 {
-	int r = g_ctx.W - BTN_MARGIN, y = g_ctx.H - BOTTOM_H + BTN_Y;
-	for (int i = 0; i < g_ctx.nbtn; i++)
+	int r = ctx->W - BTN_MARGIN, y = ctx->H - BOTTOM_H + BTN_Y;
+	for (int i = 0; i < ctx->nbtn; i++)
 	{
-		int w = btn_w(i);
-		g_ctx.btn_r[i] = (rect_t){r - w, y, r, y + BTN_H};
+		int w = btn_w(ctx, i);
+		ctx->btn_r[i] = (rect_t){r - w, y, r, y + BTN_H};
 		r -= w + BTN_GAP;
 	}
 }
 
-static void layout(void)
+static void layout(diag_ctx_t *ctx)
 {
-	g_ctx.vh = g_ctx.H - TITLE_H - BOTTOM_H;
-	g_ctx.total = imax(TEXT_Y + g_ctx.nlines * LINE_H, ICON_Y + g_spr_info.height) + TEXT_PAD_BOTTOM;
-	g_ctx.maxscroll = imax(g_ctx.total - g_ctx.vh, 0);
-	g_ctx.sbar = g_ctx.total > g_ctx.vh;
-	if (g_ctx.scroll > g_ctx.maxscroll)
-		g_ctx.scroll = g_ctx.maxscroll;
+	ctx->vh = ctx->H - TITLE_H - BOTTOM_H;
+	ctx->total = imax(TEXT_Y + ctx->nlines * LINE_H, ICON_Y + g_spr_info.height) + TEXT_PAD_BOTTOM;
+	ctx->maxscroll = imax(ctx->total - ctx->vh, 0);
+	ctx->sbar = ctx->total > ctx->vh;
+	if (ctx->scroll > ctx->maxscroll)
+		ctx->scroll = ctx->maxscroll;
 
-	int trk = g_ctx.vh - 2 * SCROLL_TRACK_PAD;
+	int trk = ctx->vh - 2 * SCROLL_TRACK_PAD;
 	int fixed = g_spr_section_scroll_piece_start.height + g_spr_section_scroll_piece_end.height;
 	int minth = fixed + g_spr_section_scroll_piece_middle.height;
-	int th = g_ctx.total ? trk * g_ctx.vh / g_ctx.total : trk;
+	int th = ctx->total ? trk * ctx->vh / ctx->total : trk;
 	th = fixed + (imin(th, trk) - fixed) / 4 * 4;
 	th = imax(imin(th, fixed + (trk - fixed) / 4 * 4), minth);
-	int ty = TITLE_H + SCROLL_TRACK_PAD + (g_ctx.maxscroll ? (trk - th) * g_ctx.scroll / g_ctx.maxscroll : 0);
-	g_ctx.track_r = (rect_t){g_ctx.W - SCROLL_W, TITLE_H + SCROLL_TRACK_PAD, g_ctx.W, TITLE_H + SCROLL_TRACK_PAD + trk};
-	g_ctx.thumb_r = (rect_t){g_ctx.W - SCROLL_W, ty, g_ctx.W, ty + th};
-	g_ctx.close_r = (rect_t){g_ctx.W - CLOSE_MARGIN - CLOSE_BOX, CLOSE_MARGIN, g_ctx.W - CLOSE_MARGIN, CLOSE_MARGIN + CLOSE_BOX};
-	layout_buttons();
+	int ty = TITLE_H + SCROLL_TRACK_PAD + (ctx->maxscroll ? (trk - th) * ctx->scroll / ctx->maxscroll : 0);
+	ctx->track_r = (rect_t){ctx->W - SCROLL_W, TITLE_H + SCROLL_TRACK_PAD, ctx->W, TITLE_H + SCROLL_TRACK_PAD + trk};
+	ctx->thumb_r = (rect_t){ctx->W - SCROLL_W, ty, ctx->W, ty + th};
+	ctx->close_r = (rect_t){ctx->W - CLOSE_MARGIN - CLOSE_BOX, CLOSE_MARGIN, ctx->W - CLOSE_MARGIN, CLOSE_MARGIN + CLOSE_BOX};
+	layout_buttons(ctx);
 }
 
-static void set_scroll(int s)
+static void set_scroll(diag_ctx_t *ctx, int s)
 {
-	s = imax(imin(s, g_ctx.maxscroll), 0);
-	if (s == g_ctx.scroll)
+	s = imax(imin(s, ctx->maxscroll), 0);
+	if (s == ctx->scroll)
 		return;
-	g_ctx.scroll = s;
-	layout();
-	mark(body_r());
+	ctx->scroll = s;
+	layout(ctx);
+	mark(ctx, body_r(ctx));
 }
 
-static int alloc_screen(void)
+static int alloc_screen(diag_ctx_t *ctx)
 {
-	free(g_ctx.screen.data);
-	g_ctx.screen.width = (unsigned short)g_ctx.W;
-	g_ctx.screen.height = (unsigned short)g_ctx.H;
-	g_ctx.screen.data = malloc((size_t)g_ctx.W * g_ctx.H * sizeof(pixel_t));
-	return g_ctx.screen.data != NULL;
+	free(ctx->screen.data);
+	ctx->screen.width = (unsigned short)ctx->W;
+	ctx->screen.height = (unsigned short)ctx->H;
+	ctx->screen.data = malloc((size_t)ctx->W * ctx->H * sizeof(pixel_t));
+	return ctx->screen.data != NULL;
 }
 
-static int make_title_sprite(void)
+static int make_title_sprite(diag_ctx_t *ctx)
 {
-	int avail = g_ctx.W - TITLE_TEXT_X - CLOSE_MARGIN - CLOSE_BOX - TITLE_TEXT_GAP;
+	int avail = ctx->W - TITLE_TEXT_X - CLOSE_MARGIN - CLOSE_BOX - TITLE_TEXT_GAP;
 	int cols = imax(avail / FONT_W, 0), n;
-	uint32_t *all = decode(g_ctx.title, &n);
+	uint32_t *all = decode(ctx->title, &n);
 	if (!all)
 		return 0;
 	uint32_t shown[256];
@@ -279,58 +277,56 @@ static int make_title_sprite(void)
 	}
 	free(all);
 	int w = imax(k, 1) * FONT_W;
-	g_ctx.title_sprite.width = (unsigned short)w;
-	g_ctx.title_sprite.height = FONT_H;
-	g_ctx.title_sprite.data = malloc((size_t)w * FONT_H * sizeof(pixel_t));
-	if (!g_ctx.title_sprite.data)
+	ctx->title_sprite.width = (unsigned short)w;
+	ctx->title_sprite.height = FONT_H;
+	ctx->title_sprite.data = malloc((size_t)w * FONT_H * sizeof(pixel_t));
+	if (!ctx->title_sprite.data)
 		return 0;
-	paint_target(&g_ctx.title_sprite);
-	paint_fill((rect_t){0, 0, w, FONT_H}, g_bg2_color);
-	paint_text(shown, k, 0, 0, g_text_color, g_bg2_color);
+	paint_target(&ctx->paint, &ctx->title_sprite);
+	paint_fill(&ctx->paint, (rect_t){0, 0, w, FONT_H}, g_bg2_color);
+	paint_text(&ctx->paint, shown, k, 0, 0, g_text_color, g_bg2_color);
 	return 1;
 }
 
-int ui_init(const char *title, const char *message, const char *const *buttons, int n, int icon)
+int ui_init(diag_ctx_t *ctx, const char *title, const char *message, const char *const *buttons, int n, int icon)
 {
-	memset(&g_ctx, 0, sizeof g_ctx);
-	if (!atlas_init())
-		return 0;
+	memset(ctx, 0, sizeof *ctx);
 	if (n > MAX_BUTTONS)
 		n = MAX_BUTTONS;
-	g_ctx.title = title ? title : "";
-	g_ctx.message = message;
-	g_ctx.btn = buttons;
-	g_ctx.nbtn = n;
-	g_ctx.icon = icon < 0 || icon > 2 ? 0 : icon;
-	g_ctx.hover_btn = -1;
-	g_ctx.result = -1;
-	g_ctx.mx = g_ctx.my = -1;
+	ctx->title = title ? title : "";
+	ctx->message = message;
+	ctx->btn = buttons;
+	ctx->nbtn = n;
+	ctx->icon = icon < 0 || icon > 2 ? 0 : icon;
+	ctx->hover_btn = -1;
+	ctx->result = -1;
+	ctx->mx = ctx->my = -1;
 
 	for (int i = 0; i < n; i++)
 	{
-		g_ctx.bcp[i] = decode(buttons[i], &g_ctx.bcells[i]);
-		if (!g_ctx.bcp[i])
+		ctx->bcp[i] = decode(buttons[i], &ctx->bcells[i]);
+		if (!ctx->bcp[i])
 		{
-			ui_free();
+			ui_free(ctx);
 			return 0;
 		}
 	}
 	int tn;
-	uint32_t *t = decode(g_ctx.title, &tn);
+	uint32_t *t = decode(ctx->title, &tn);
 	if (!t)
 	{
-		ui_free();
+		ui_free(ctx);
 		return 0;
 	}
 	free(t);
-	g_ctx.tcells = tn;
+	ctx->tcells = tn;
 
 	size_t ml = strlen(message);
-	g_ctx.cps = malloc((ml * TAB_COLS + 1) * sizeof *g_ctx.cps);
-	g_ctx.lines = malloc((ml * TAB_COLS + 2) * sizeof *g_ctx.lines);
-	if (!g_ctx.cps || !g_ctx.lines)
+	ctx->cps = malloc((ml * TAB_COLS + 1) * sizeof *ctx->cps);
+	ctx->lines = malloc((ml * TAB_COLS + 2) * sizeof *ctx->lines);
+	if (!ctx->cps || !ctx->lines)
 	{
-		ui_free();
+		ui_free(ctx);
 		return 0;
 	}
 
@@ -344,70 +340,69 @@ int ui_init(const char *title, const char *message, const char *const *buttons, 
 		{
 			do
 			{
-				g_ctx.cps[g_ctx.ncps++] = ' ';
+				ctx->cps[ctx->ncps++] = ' ';
 				col++;
 			} while (col % TAB_COLS);
 		}
 		else if (c == '\n')
 		{
-			g_ctx.cps[g_ctx.ncps++] = c;
+			ctx->cps[ctx->ncps++] = c;
 			col = 0;
 		}
 		else
 		{
-			g_ctx.cps[g_ctx.ncps++] = c;
+			ctx->cps[ctx->ncps++] = c;
 			col++;
 		}
-		if (col > g_ctx.maxcells)
-			g_ctx.maxcells = col;
+		if (col > ctx->maxcells)
+			ctx->maxcells = col;
 	}
 
-	int minw = imax(WIN_MIN_W, btn_row()), maxw = imax(WIN_MAX_W, minw);
-	int want = imax(TEXT_X + TEXT_RIGHT_MARGIN + g_ctx.maxcells * FONT_W,
-					TITLE_TEXT_X + g_ctx.tcells * FONT_W + TITLE_TEXT_GAP + CLOSE_BOX + CLOSE_MARGIN);
-	g_ctx.W = imax(imin(want, maxw), minw);
-	g_ctx.cols = imax((g_ctx.W - TEXT_X - TEXT_RIGHT_MARGIN) / FONT_W, 1);
+	int minw = imax(WIN_MIN_W, btn_row(ctx)), maxw = imax(WIN_MAX_W, minw);
+	int want = imax(TEXT_X + TEXT_RIGHT_MARGIN + ctx->maxcells * FONT_W,
+					TITLE_TEXT_X + ctx->tcells * FONT_W + TITLE_TEXT_GAP + CLOSE_BOX + CLOSE_MARGIN);
+	ctx->W = imax(imin(want, maxw), minw);
+	ctx->cols = imax((ctx->W - TEXT_X - TEXT_RIGHT_MARGIN) / FONT_W, 1);
 
-	wrap(g_ctx.cols);
-	int content = imax(TEXT_Y + g_ctx.nlines * LINE_H, ICON_Y + g_spr_info.height) + TEXT_PAD_BOTTOM;
-	g_ctx.H = imax(imin(TITLE_H + content + BOTTOM_H, INIT_MAX_H), WIN_MIN_H);
+	wrap(ctx, ctx->cols);
+	int content = imax(TEXT_Y + ctx->nlines * LINE_H, ICON_Y + g_spr_info.height) + TEXT_PAD_BOTTOM;
+	ctx->H = imax(imin(TITLE_H + content + BOTTOM_H, INIT_MAX_H), WIN_MIN_H);
 
-	g_ctx.body_sprite.width = (unsigned short)(g_ctx.cols * FONT_W);
-	g_ctx.body_sprite.height = (unsigned short)(g_ctx.nlines * LINE_H);
-	g_ctx.body_sprite.data = malloc((size_t)g_ctx.body_sprite.width * g_ctx.body_sprite.height * sizeof(pixel_t));
-	if (!g_ctx.body_sprite.data || !alloc_screen() || !make_title_sprite())
+	ctx->body_sprite.width = (unsigned short)(ctx->cols * FONT_W);
+	ctx->body_sprite.height = (unsigned short)(ctx->nlines * LINE_H);
+	ctx->body_sprite.data = malloc((size_t)ctx->body_sprite.width * ctx->body_sprite.height * sizeof(pixel_t));
+	if (!ctx->body_sprite.data || !alloc_screen(ctx) || !make_title_sprite(ctx))
 	{
-		ui_free();
+		ui_free(ctx);
 		return 0;
 	}
-	for (int i = 0; i < g_ctx.nlines; i++)
-		render_line(i);
+	for (int i = 0; i < ctx->nlines; i++)
+		render_line(ctx, i);
 
-	layout();
-	ui_invalidate();
+	layout(ctx);
+	ui_invalidate(ctx);
 	return 1;
 }
 
-void ui_free(void)
+void ui_free(diag_ctx_t *ctx)
 {
 	for (int i = 0; i < MAX_BUTTONS; i++)
-		free(g_ctx.bcp[i]);
-	free(g_ctx.cps);
-	free(g_ctx.lines);
-	free(g_ctx.screen.data);
-	free(g_ctx.title_sprite.data);
-	free(g_ctx.body_sprite.data);
-	free(g_ctx.copybuf);
-	atlas_free();
-	memset(&g_ctx, 0, sizeof g_ctx);
+		free(ctx->bcp[i]);
+	free(ctx->cps);
+	free(ctx->lines);
+	free(ctx->screen.data);
+	free(ctx->title_sprite.data);
+	free(ctx->body_sprite.data);
+	free(ctx->copybuf);
+	memset(ctx, 0, sizeof *ctx);
 }
 
-const char *ui_title(void) { return g_ctx.title; }
+const char *ui_title(diag_ctx_t *ctx) { return ctx->title; }
 
-void ui_size(int *w, int *h)
+void ui_size(diag_ctx_t *ctx, int *w, int *h)
 {
-	*w = g_ctx.W;
-	*h = g_ctx.H;
+	*w = ctx->W;
+	*h = ctx->H;
 }
 
 void ui_limits(int *minh, int *maxh)
@@ -416,131 +411,131 @@ void ui_limits(int *minh, int *maxh)
 	*maxh = imax(WIN_MAX_H, WIN_MIN_H);
 }
 
-void ui_set_height(int h)
+void ui_set_height(diag_ctx_t *ctx, int h)
 {
 	h = imax(imin(h, WIN_MAX_H), WIN_MIN_H);
-	if (h == g_ctx.H)
+	if (h == ctx->H)
 		return;
-	g_ctx.H = h;
-	if (!alloc_screen())
+	ctx->H = h;
+	if (!alloc_screen(ctx))
 	{
-		g_ctx.done = 1;
+		ctx->done = 1;
 		return;
 	}
-	layout();
-	ui_invalidate();
+	layout(ctx);
+	ui_invalidate(ctx);
 }
 
-void ui_invalidate(void)
+void ui_invalidate(diag_ctx_t *ctx)
 {
-	g_ctx.dirty = (rect_t){0, 0, g_ctx.W, g_ctx.H};
+	ctx->dirty = (rect_t){0, 0, ctx->W, ctx->H};
 }
 
-static const sprite_t *icon_sprite(void)
+static const sprite_t *icon_sprite(diag_ctx_t *ctx)
 {
-	return g_ctx.icon == 1 ? &g_spr_warning : g_ctx.icon == 2 ? &g_spr_error
-													  : &g_spr_info;
+	return ctx->icon == 1 ? &g_spr_warning : ctx->icon == 2 ? &g_spr_error
+															: &g_spr_info;
 }
 
-static void paint_title(rect_t d)
+static void paint_title(diag_ctx_t *ctx, rect_t d)
 {
-	rect_t t = title_r();
-	paint_clip(clipto(d, t));
-	paint_bar_top(t);
-	paint_blit(&g_ctx.title_sprite, TITLE_TEXT_X, TITLE_TEXT_Y);
-	int st = g_ctx.hover_close ? (g_ctx.down == T_CLOSE ? EMBOSS_DOWN : EMBOSS_HOVER) : EMBOSS_NORMAL;
-	paint_emboss(g_ctx.close_r, st);
-	paint_blit_keyed(&g_spr_close, g_ctx.close_r.x0 + CLOSE_SPRITE_INSET, g_ctx.close_r.y0 + CLOSE_SPRITE_INSET);
+	rect_t t = title_r(ctx);
+	paint_clip(&ctx->paint, clipto(d, t));
+	paint_bar_top(&ctx->paint, t);
+	paint_blit(&ctx->paint, &ctx->title_sprite, TITLE_TEXT_X, TITLE_TEXT_Y);
+	int st = ctx->hover_close ? (ctx->down == T_CLOSE ? EMBOSS_DOWN : EMBOSS_HOVER) : EMBOSS_NORMAL;
+	paint_emboss(&ctx->paint, ctx->close_r, st);
+	paint_blit_keyed(&ctx->paint, &g_spr_close, ctx->close_r.x0 + CLOSE_SPRITE_INSET, ctx->close_r.y0 + CLOSE_SPRITE_INSET);
 }
 
-static void paint_body(rect_t d)
+static void paint_body(diag_ctx_t *ctx, rect_t d)
 {
-	rect_t b = body_r();
-	paint_clip(clipto(d, b));
-	paint_fill(b, g_bg_color);
-	paint_blit(icon_sprite(), ICON_X, TITLE_H + ICON_Y - g_ctx.scroll);
-	paint_blit(&g_ctx.body_sprite, TEXT_X, TITLE_H + TEXT_Y - g_ctx.scroll);
-	if (g_ctx.scroll > 0)
-		paint_fade((rect_t){0, b.y0, g_ctx.W, b.y0 + FADE_H}, g_bg_color, 1);
-	if (g_ctx.scroll < g_ctx.maxscroll)
-		paint_fade((rect_t){0, b.y1 - FADE_H, g_ctx.W, b.y1}, g_bg_color, 0);
-	if (g_ctx.sbar)
-		paint_scrollbar(g_ctx.thumb_r.x0, g_ctx.thumb_r.y0, g_ctx.thumb_r.y1 - g_ctx.thumb_r.y0);
+	rect_t b = body_r(ctx);
+	paint_clip(&ctx->paint, clipto(d, b));
+	paint_fill(&ctx->paint, b, g_bg_color);
+	paint_blit(&ctx->paint, icon_sprite(ctx), ICON_X, TITLE_H + ICON_Y - ctx->scroll);
+	paint_blit(&ctx->paint, &ctx->body_sprite, TEXT_X, TITLE_H + TEXT_Y - ctx->scroll);
+	if (ctx->scroll > 0)
+		paint_fade(&ctx->paint, (rect_t){0, b.y0, ctx->W, b.y0 + FADE_H}, g_bg_color, 1);
+	if (ctx->scroll < ctx->maxscroll)
+		paint_fade(&ctx->paint, (rect_t){0, b.y1 - FADE_H, ctx->W, b.y1}, g_bg_color, 0);
+	if (ctx->sbar)
+		paint_scrollbar(&ctx->paint, ctx->thumb_r.x0, ctx->thumb_r.y0, ctx->thumb_r.y1 - ctx->thumb_r.y0);
 }
 
-static void paint_bottom(rect_t d)
+static void paint_bottom(diag_ctx_t *ctx, rect_t d)
 {
-	rect_t b = bottom_r();
-	paint_clip(clipto(d, b));
-	paint_bar_bottom(b);
-	for (int i = 0; i < g_ctx.nbtn; i++)
+	rect_t b = bottom_r(ctx);
+	paint_clip(&ctx->paint, clipto(d, b));
+	paint_bar_bottom(&ctx->paint, b);
+	for (int i = 0; i < ctx->nbtn; i++)
 	{
-		rect_t r = g_ctx.btn_r[i];
-		int pressed = g_ctx.down == T_BTN && g_ctx.down_i == i && g_ctx.hover_btn == i;
-		int st = pressed ? EMBOSS_DOWN : g_ctx.focus == i ? EMBOSS_HOVER
-													  : EMBOSS_NORMAL;
-		paint_emboss(r, st);
-		paint_text(g_ctx.bcp[i], g_ctx.bcells[i], r.x0 + (r.x1 - r.x0 - g_ctx.bcells[i] * FONT_W) / 2, r.y0 + BTN_TEXT_Y,
+		rect_t r = ctx->btn_r[i];
+		int pressed = ctx->down == T_BTN && ctx->down_i == i && ctx->hover_btn == i;
+		int st = pressed ? EMBOSS_DOWN : ctx->focus == i ? EMBOSS_HOVER
+														 : EMBOSS_NORMAL;
+		paint_emboss(&ctx->paint, r, st);
+		paint_text(&ctx->paint, ctx->bcp[i], ctx->bcells[i], r.x0 + (r.x1 - r.x0 - ctx->bcells[i] * FONT_W) / 2, r.y0 + BTN_TEXT_Y,
 				   g_text_color, paint_emboss_fill(st));
 	}
 }
 
-int ui_paint(rect_t *out)
+int ui_paint(diag_ctx_t *ctx, rect_t *out)
 {
-	if (empty(g_ctx.dirty))
+	if (empty(ctx->dirty))
 		return 0;
-	rect_t d = clipto(g_ctx.dirty, (rect_t){0, 0, g_ctx.W, g_ctx.H});
-	g_ctx.dirty = (rect_t){0, 0, 0, 0};
+	rect_t d = clipto(ctx->dirty, (rect_t){0, 0, ctx->W, ctx->H});
+	ctx->dirty = (rect_t){0, 0, 0, 0};
 	if (empty(d))
 		return 0;
-	paint_target(&g_ctx.screen);
-	if (isect(d, title_r()))
-		paint_title(d);
-	if (isect(d, body_r()))
-		paint_body(d);
-	if (isect(d, bottom_r()))
-		paint_bottom(d);
+	paint_target(&ctx->paint, &ctx->screen);
+	if (isect(d, title_r(ctx)))
+		paint_title(ctx, d);
+	if (isect(d, body_r(ctx)))
+		paint_body(ctx, d);
+	if (isect(d, bottom_r(ctx)))
+		paint_bottom(ctx, d);
 	*out = d;
 	return 1;
 }
 
-void ui_present(uint32_t *out, int ow, int oh, int S, const rect_t *sd, rect_t *dd)
+void ui_present(diag_ctx_t *ctx, uint32_t *out, int ow, int oh, int S, const rect_t *sd, rect_t *dd)
 {
-	paint_present(&g_ctx.screen, out, ow, oh, S, sd, dd);
+	paint_present(&ctx->screen, out, ow, oh, S, sd, dd);
 }
 
-static int hit_btn(int x, int y)
+static int hit_btn(diag_ctx_t *ctx, int x, int y)
 {
-	for (int i = 0; i < g_ctx.nbtn; i++)
-		if (inr(g_ctx.btn_r[i], x, y))
+	for (int i = 0; i < ctx->nbtn; i++)
+		if (inr(ctx->btn_r[i], x, y))
 			return i;
 	return -1;
 }
 
-static int hit_edge(int x, int y)
+static int hit_edge(diag_ctx_t *ctx, int x, int y)
 {
 	(void)x;
 	if (y >= 0 && y < RESIZE_ZONE)
 		return EDGE_T;
-	if (y >= g_ctx.H - RESIZE_ZONE && y < g_ctx.H)
+	if (y >= ctx->H - RESIZE_ZONE && y < ctx->H)
 		return EDGE_B;
 	return 0;
 }
 
-static int in_text_area(int x, int y)
+static int in_text_area(diag_ctx_t *ctx, int x, int y)
 {
-	return y >= TITLE_H && y < g_ctx.H - BOTTOM_H && x >= 0 && x < g_ctx.W - SCROLL_W;
+	return y >= TITLE_H && y < ctx->H - BOTTOM_H && x >= 0 && x < ctx->W - SCROLL_W;
 }
 
-static int line_at(int y)
+static int line_at(diag_ctx_t *ctx, int y)
 {
-	int v = y - (TITLE_H + TEXT_Y) + g_ctx.scroll, li = v < 0 ? 0 : v / LINE_H;
-	return li >= g_ctx.nlines ? g_ctx.nlines - 1 : li;
+	int v = y - (TITLE_H + TEXT_Y) + ctx->scroll, li = v < 0 ? 0 : v / LINE_H;
+	return li >= ctx->nlines ? ctx->nlines - 1 : li;
 }
 
-static int idx_at(int x, int y, int caret)
+static int idx_at(diag_ctx_t *ctx, int x, int y, int caret)
 {
-	const line_t *ln = &g_ctx.lines[line_at(y)];
+	const line_t *ln = &ctx->lines[line_at(ctx, y)];
 	int len = ln->end - ln->start, hx = x - TEXT_X + (caret ? FONT_W / 2 : 0);
 	int col = hx < 0 ? 0 : hx / FONT_W, max = caret ? len : len - 1;
 	if (col > max)
@@ -559,176 +554,176 @@ static int cls(uint32_t c)
 	return 2;
 }
 
-static void select_word(int x, int y)
+static void select_word(diag_ctx_t *ctx, int x, int y)
 {
-	const line_t *ln = &g_ctx.lines[line_at(y)];
+	const line_t *ln = &ctx->lines[line_at(ctx, y)];
 	if (ln->end == ln->start)
 		return;
-	int c = idx_at(x, y, 0), k = cls(g_ctx.cps[c]), lo = c, hi = c + 1;
-	while (lo > ln->start && cls(g_ctx.cps[lo - 1]) == k)
+	int c = idx_at(ctx, x, y, 0), k = cls(ctx->cps[c]), lo = c, hi = c + 1;
+	while (lo > ln->start && cls(ctx->cps[lo - 1]) == k)
 		lo--;
-	while (hi < ln->end && cls(g_ctx.cps[hi]) == k)
+	while (hi < ln->end && cls(ctx->cps[hi]) == k)
 		hi++;
-	set_sel(lo, hi);
+	set_sel(ctx, lo, hi);
 }
 
-static void finish(int r)
+static void finish(diag_ctx_t *ctx, int r)
 {
-	g_ctx.result = r;
-	g_ctx.done = 1;
+	ctx->result = r;
+	ctx->done = 1;
 }
 
-static void set_focus(int i)
+static void set_focus(diag_ctx_t *ctx, int i)
 {
-	if (i == g_ctx.focus)
+	if (i == ctx->focus)
 		return;
-	mark(g_ctx.btn_r[g_ctx.focus]);
-	g_ctx.focus = i;
-	mark(g_ctx.btn_r[i]);
+	mark(ctx, ctx->btn_r[ctx->focus]);
+	ctx->focus = i;
+	mark(ctx, ctx->btn_r[i]);
 }
 
-void ui_pointer(int x, int y)
+void ui_pointer(diag_ctx_t *ctx, int x, int y)
 {
-	g_ctx.mx = x;
-	g_ctx.my = y;
-	int hb = hit_btn(x, y), hc = inr(g_ctx.close_r, x, y);
-	if (hc != g_ctx.hover_close)
+	ctx->mx = x;
+	ctx->my = y;
+	int hb = hit_btn(ctx, x, y), hc = inr(ctx->close_r, x, y);
+	if (hc != ctx->hover_close)
 	{
-		g_ctx.hover_close = hc;
-		mark(g_ctx.close_r);
+		ctx->hover_close = hc;
+		mark(ctx, ctx->close_r);
 	}
-	if (hb != g_ctx.hover_btn)
+	if (hb != ctx->hover_btn)
 	{
-		if (g_ctx.hover_btn >= 0)
-			mark(g_ctx.btn_r[g_ctx.hover_btn]);
-		g_ctx.hover_btn = hb;
+		if (ctx->hover_btn >= 0)
+			mark(ctx, ctx->btn_r[ctx->hover_btn]);
+		ctx->hover_btn = hb;
 		if (hb >= 0)
-			mark(g_ctx.btn_r[hb]);
+			mark(ctx, ctx->btn_r[hb]);
 	}
 	if (hb >= 0)
-		set_focus(hb);
+		set_focus(ctx, hb);
 
-	if (g_ctx.down == T_TEXT)
+	if (ctx->down == T_TEXT)
 	{
 		if (y < TITLE_H)
-			set_scroll(g_ctx.scroll - LINE_H);
-		else if (y >= g_ctx.H - BOTTOM_H)
-			set_scroll(g_ctx.scroll + LINE_H);
-		set_sel(g_ctx.sel_a, idx_at(x, y, 1));
+			set_scroll(ctx, ctx->scroll - LINE_H);
+		else if (y >= ctx->H - BOTTOM_H)
+			set_scroll(ctx, ctx->scroll + LINE_H);
+		set_sel(ctx, ctx->sel_a, idx_at(ctx, x, y, 1));
 	}
-	else if (g_ctx.down == T_THUMB)
+	else if (ctx->down == T_THUMB)
 	{
-		int range = g_ctx.track_r.y1 - g_ctx.track_r.y0 - (g_ctx.thumb_r.y1 - g_ctx.thumb_r.y0);
+		int range = ctx->track_r.y1 - ctx->track_r.y0 - (ctx->thumb_r.y1 - ctx->thumb_r.y0);
 		if (range > 0)
-			set_scroll((y - g_ctx.dragoff - g_ctx.track_r.y0) * g_ctx.maxscroll / range);
+			set_scroll(ctx, (y - ctx->dragoff - ctx->track_r.y0) * ctx->maxscroll / range);
 	}
 }
 
-void ui_leave(void)
+void ui_leave(diag_ctx_t *ctx)
 {
-	g_ctx.mx = g_ctx.my = -1;
-	if (g_ctx.hover_close)
+	ctx->mx = ctx->my = -1;
+	if (ctx->hover_close)
 	{
-		g_ctx.hover_close = 0;
-		mark(g_ctx.close_r);
+		ctx->hover_close = 0;
+		mark(ctx, ctx->close_r);
 	}
-	if (g_ctx.hover_btn >= 0)
+	if (ctx->hover_btn >= 0)
 	{
-		mark(g_ctx.btn_r[g_ctx.hover_btn]);
-		g_ctx.hover_btn = -1;
+		mark(ctx, ctx->btn_r[ctx->hover_btn]);
+		ctx->hover_btn = -1;
 	}
 }
 
-void ui_button(int pressed, unsigned time)
+void ui_button(diag_ctx_t *ctx, int pressed, unsigned time)
 {
-	int x = g_ctx.mx, y = g_ctx.my;
+	int x = ctx->mx, y = ctx->my;
 	if (!pressed)
 	{
-		if (g_ctx.down == T_CLOSE && inr(g_ctx.close_r, x, y))
-			finish(-1);
-		else if (g_ctx.down == T_BTN && hit_btn(x, y) == g_ctx.down_i)
-			finish(g_ctx.down_i);
-		if (g_ctx.down == T_CLOSE)
-			mark(g_ctx.close_r);
-		if (g_ctx.down == T_BTN)
-			mark(g_ctx.btn_r[g_ctx.down_i]);
-		g_ctx.down = T_NONE;
+		if (ctx->down == T_CLOSE && inr(ctx->close_r, x, y))
+			finish(ctx, -1);
+		else if (ctx->down == T_BTN && hit_btn(ctx, x, y) == ctx->down_i)
+			finish(ctx, ctx->down_i);
+		if (ctx->down == T_CLOSE)
+			mark(ctx, ctx->close_r);
+		if (ctx->down == T_BTN)
+			mark(ctx, ctx->btn_r[ctx->down_i]);
+		ctx->down = T_NONE;
 		return;
 	}
 	int b, e;
-	if (inr(g_ctx.close_r, x, y))
+	if (inr(ctx->close_r, x, y))
 	{
-		g_ctx.down = T_CLOSE;
-		mark(g_ctx.close_r);
+		ctx->down = T_CLOSE;
+		mark(ctx, ctx->close_r);
 	}
-	else if ((e = hit_edge(x, y)))
+	else if ((e = hit_edge(ctx, x, y)))
 	{
-		g_ctx.action = ACT_RESIZE;
-		g_ctx.edge = e;
+		ctx->action = ACT_RESIZE;
+		ctx->edge = e;
 	}
-	else if ((b = hit_btn(x, y)) >= 0)
+	else if ((b = hit_btn(ctx, x, y)) >= 0)
 	{
-		g_ctx.down = T_BTN;
-		g_ctx.down_i = b;
-		set_focus(b);
-		mark(g_ctx.btn_r[b]);
+		ctx->down = T_BTN;
+		ctx->down_i = b;
+		set_focus(ctx, b);
+		mark(ctx, ctx->btn_r[b]);
 	}
 	else if (y < TITLE_H)
-		g_ctx.action = ACT_MOVE;
-	else if (g_ctx.sbar && inr(g_ctx.track_r, x, y))
+		ctx->action = ACT_MOVE;
+	else if (ctx->sbar && inr(ctx->track_r, x, y))
 	{
-		if (inr(g_ctx.thumb_r, x, y))
+		if (inr(ctx->thumb_r, x, y))
 		{
-			g_ctx.down = T_THUMB;
-			g_ctx.dragoff = y - g_ctx.thumb_r.y0;
+			ctx->down = T_THUMB;
+			ctx->dragoff = y - ctx->thumb_r.y0;
 		}
 		else
-			set_scroll(g_ctx.scroll + (y < g_ctx.thumb_r.y0 ? -1 : 1) * (g_ctx.vh * 9 / 10));
+			set_scroll(ctx, ctx->scroll + (y < ctx->thumb_r.y0 ? -1 : 1) * (ctx->vh * 9 / 10));
 	}
-	else if (in_text_area(x, y))
+	else if (in_text_area(ctx, x, y))
 	{
-		int dbl = g_ctx.last_valid && time - g_ctx.last_t < DOUBLE_CLICK_MS && abs(x - g_ctx.last_x) <= 4 && abs(y - g_ctx.last_y) <= 4;
-		g_ctx.last_valid = !dbl;
-		g_ctx.last_t = time;
-		g_ctx.last_x = x;
-		g_ctx.last_y = y;
+		int dbl = ctx->last_valid && time - ctx->last_t < DOUBLE_CLICK_MS && abs(x - ctx->last_x) <= 4 && abs(y - ctx->last_y) <= 4;
+		ctx->last_valid = !dbl;
+		ctx->last_t = time;
+		ctx->last_x = x;
+		ctx->last_y = y;
 		if (dbl)
-			select_word(x, y);
+			select_word(ctx, x, y);
 		else
 		{
-			int i = idx_at(x, y, 1);
-			g_ctx.down = T_TEXT;
-			set_sel(i, i);
+			int i = idx_at(ctx, x, y, 1);
+			ctx->down = T_TEXT;
+			set_sel(ctx, i, i);
 		}
 	}
 }
 
-void ui_wheel(int lines_x100)
+void ui_wheel(diag_ctx_t *ctx, int lines_x100)
 {
-	set_scroll(g_ctx.scroll + lines_x100 * LINE_H / 100);
+	set_scroll(ctx, ctx->scroll + lines_x100 * LINE_H / 100);
 }
 
-static void do_copy(void)
+static void do_copy(diag_ctx_t *ctx)
 {
-	free(g_ctx.copybuf);
-	g_ctx.copybuf = NULL;
-	g_ctx.copylen = 0;
-	int lo = sel_lo(), hi = sel_hi();
+	free(ctx->copybuf);
+	ctx->copybuf = NULL;
+	ctx->copylen = 0;
+	int lo = sel_lo(ctx), hi = sel_hi(ctx);
 	char *o;
 	if (lo != hi)
 	{
-		o = g_ctx.copybuf = malloc((size_t)(hi - lo) * 4 + 1);
+		o = ctx->copybuf = malloc((size_t)(hi - lo) * 4 + 1);
 		if (!o)
 			return;
 		for (int i = lo; i < hi; i++)
-			o = u8put(o, g_ctx.cps[i]);
+			o = u8put(o, ctx->cps[i]);
 	}
 	else
 	{
-		size_t cap = strlen(g_ctx.title) + strlen(g_ctx.message) + 128;
-		for (int i = 0; i < g_ctx.nbtn; i++)
-			cap += strlen(g_ctx.btn[i]) + 8;
-		o = g_ctx.copybuf = malloc(cap);
+		size_t cap = strlen(ctx->title) + strlen(ctx->message) + 128;
+		for (int i = 0; i < ctx->nbtn; i++)
+			cap += strlen(ctx->btn[i]) + 8;
+		o = ctx->copybuf = malloc(cap);
 		if (!o)
 			return;
 #define APP(s)                 \
@@ -739,34 +734,34 @@ static void do_copy(void)
 		o += l_;               \
 	} while (0)
 		APP("--- ");
-		APP(g_ctx.title);
+		APP(ctx->title);
 		APP(" ---\n\n");
-		APP(g_ctx.message);
+		APP(ctx->message);
 		APP("\n------------------------------------------------\n\n{ ");
-		for (int i = g_ctx.nbtn - 1; i >= 0; i--)
+		for (int i = ctx->nbtn - 1; i >= 0; i--)
 		{
-			APP(g_ctx.btn[i]);
+			APP(ctx->btn[i]);
 			if (i)
 				APP(" } { ");
 		}
 		APP(" }");
 #undef APP
 	}
-	g_ctx.copylen = (size_t)(o - g_ctx.copybuf);
-	g_ctx.copy = 1;
+	ctx->copylen = (size_t)(o - ctx->copybuf);
+	ctx->copy = 1;
 }
 
-void ui_key(int k, int down)
+void ui_key(diag_ctx_t *ctx, int k, int down)
 {
 	switch (k)
 	{
 	case 29:
 	case 97:
-		g_ctx.ctrl = down;
+		ctx->ctrl = down;
 		return;
 	case 42:
 	case 54:
-		g_ctx.shift = down;
+		ctx->shift = down;
 		return;
 	}
 	if (!down)
@@ -774,88 +769,88 @@ void ui_key(int k, int down)
 	switch (k)
 	{
 	case 1:
-		finish(-1);
+		finish(ctx, -1);
 		break;
 	case 28:
 	case 96:
 	case 57:
-		finish(g_ctx.focus);
+		finish(ctx, ctx->focus);
 		break;
 	case 105:
-		if (g_ctx.focus < g_ctx.nbtn - 1)
-			set_focus(g_ctx.focus + 1);
+		if (ctx->focus < ctx->nbtn - 1)
+			set_focus(ctx, ctx->focus + 1);
 		break;
 	case 106:
-		if (g_ctx.focus > 0)
-			set_focus(g_ctx.focus - 1);
+		if (ctx->focus > 0)
+			set_focus(ctx, ctx->focus - 1);
 		break;
 	case 15:
-		set_focus(g_ctx.shift ? (g_ctx.focus + g_ctx.nbtn - 1) % g_ctx.nbtn : (g_ctx.focus + 1) % g_ctx.nbtn);
+		set_focus(ctx, ctx->shift ? (ctx->focus + ctx->nbtn - 1) % ctx->nbtn : (ctx->focus + 1) % ctx->nbtn);
 		break;
 	case 30:
-		if (g_ctx.ctrl)
-			set_sel(0, g_ctx.nshown);
+		if (ctx->ctrl)
+			set_sel(ctx, 0, ctx->nshown);
 		break;
 	case 46:
-		if (g_ctx.ctrl)
-			do_copy();
+		if (ctx->ctrl)
+			do_copy(ctx);
 		break;
 	case 103:
-		set_scroll(g_ctx.scroll - LINE_H);
+		set_scroll(ctx, ctx->scroll - LINE_H);
 		break;
 	case 108:
-		set_scroll(g_ctx.scroll + LINE_H);
+		set_scroll(ctx, ctx->scroll + LINE_H);
 		break;
 	case 104:
-		set_scroll(g_ctx.scroll - g_ctx.vh * 9 / 10);
+		set_scroll(ctx, ctx->scroll - ctx->vh * 9 / 10);
 		break;
 	case 109:
-		set_scroll(g_ctx.scroll + g_ctx.vh * 9 / 10);
+		set_scroll(ctx, ctx->scroll + ctx->vh * 9 / 10);
 		break;
 	case 102:
-		set_scroll(0);
+		set_scroll(ctx, 0);
 		break;
 	case 107:
-		set_scroll(g_ctx.maxscroll);
+		set_scroll(ctx, ctx->maxscroll);
 		break;
 	}
 }
 
-void ui_focus_lost(void)
+void ui_focus_lost(diag_ctx_t *ctx)
 {
-	g_ctx.ctrl = g_ctx.shift = 0;
+	ctx->ctrl = ctx->shift = 0;
 }
 
-int ui_done(void) { return g_ctx.done; }
-int ui_result(void) { return g_ctx.result; }
+int ui_done(diag_ctx_t *ctx) { return ctx->done; }
+int ui_result(diag_ctx_t *ctx) { return ctx->result; }
 
-int ui_take_action(int *edge)
+int ui_take_action(diag_ctx_t *ctx, int *edge)
 {
-	int a = g_ctx.action;
-	*edge = g_ctx.edge;
-	g_ctx.action = ACT_NONE;
+	int a = ctx->action;
+	*edge = ctx->edge;
+	ctx->action = ACT_NONE;
 	return a;
 }
 
-const char *ui_take_copy(size_t *len)
+const char *ui_take_copy(diag_ctx_t *ctx, size_t *len)
 {
-	if (!g_ctx.copy)
+	if (!ctx->copy)
 		return NULL;
-	g_ctx.copy = 0;
-	*len = g_ctx.copylen;
-	return g_ctx.copybuf;
+	ctx->copy = 0;
+	*len = ctx->copylen;
+	return ctx->copybuf;
 }
 
-int ui_cursor(void)
+int ui_cursor(diag_ctx_t *ctx)
 {
-	if (g_ctx.down == T_TEXT)
+	if (ctx->down == T_TEXT)
 		return CUR_TEXT;
-	if (g_ctx.down != T_NONE || inr(g_ctx.close_r, g_ctx.mx, g_ctx.my) || hit_btn(g_ctx.mx, g_ctx.my) >= 0)
+	if (ctx->down != T_NONE || inr(ctx->close_r, ctx->mx, ctx->my) || hit_btn(ctx, ctx->mx, ctx->my) >= 0)
 		return CUR_ARROW;
-	int e = hit_edge(g_ctx.mx, g_ctx.my);
+	int e = hit_edge(ctx, ctx->mx, ctx->my);
 	if (e)
 		return e == EDGE_T ? CUR_RESIZE_T : CUR_RESIZE_B;
-	return in_text_area(g_ctx.mx, g_ctx.my) ? CUR_TEXT : CUR_ARROW;
+	return in_text_area(ctx, ctx->mx, ctx->my) ? CUR_TEXT : CUR_ARROW;
 }
 
 static int scale_from(const char *e)

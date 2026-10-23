@@ -7,6 +7,9 @@ typedef enum
 	DIALOG_ICON_ERROR
 } DialogIcon;
 
+/* one time initialization, must be called (once) before sdiag_show, returns 1 on success or 0 on failure */
+int sdiag_init(void);
+
 /* returns the index of the pressed button, -1 if the dialog was closed (esc or the close button),
    or -2 if it could not be shown (no display, missing libraries, etc) */
 int sdiag_show(

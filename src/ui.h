@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "config.h"
+#include "paint.h"
 #include "types.h"
 
 #define EDGE_T 1
@@ -24,6 +25,7 @@ typedef struct line_s
 typedef struct diag_ctx_s
 {
 	sprite_t screen, title_sprite, body_sprite;
+	paint_t paint;
 
 	const char *title, *message;
 	const char *const *btn;
@@ -46,29 +48,29 @@ typedef struct diag_ctx_s
 	size_t copylen;
 } diag_ctx_t;
 
-int ui_init(const char *title, const char *message, const char *const *buttons, int n, int icon);
-void ui_free(void);
-const char *ui_title(void);
+int ui_init(diag_ctx_t *ctx, const char *title, const char *message, const char *const *buttons, int n, int icon);
+void ui_free(diag_ctx_t *ctx);
+const char *ui_title(diag_ctx_t *ctx);
 
-void ui_size(int *w, int *h);
+void ui_size(diag_ctx_t *ctx, int *w, int *h);
 void ui_limits(int *minh, int *maxh);
-void ui_set_height(int h);
-void ui_invalidate(void);
-int ui_paint(rect_t *dirty);
-void ui_present(uint32_t *out, int ow, int oh, int scale120, const rect_t *src_dirty, rect_t *dst_dirty);
+void ui_set_height(diag_ctx_t *ctx, int h);
+void ui_invalidate(diag_ctx_t *ctx);
+int ui_paint(diag_ctx_t *ctx, rect_t *dirty);
+void ui_present(diag_ctx_t *ctx, uint32_t *out, int ow, int oh, int scale120, const rect_t *src_dirty, rect_t *dst_dirty);
 
-void ui_pointer(int x, int y);
-void ui_leave(void);
-void ui_button(int pressed, unsigned time);
-void ui_wheel(int lines_x100);
-void ui_key(int evdev, int down);
-void ui_focus_lost(void);
+void ui_pointer(diag_ctx_t *ctx, int x, int y);
+void ui_leave(diag_ctx_t *ctx);
+void ui_button(diag_ctx_t *ctx, int pressed, unsigned time);
+void ui_wheel(diag_ctx_t *ctx, int lines_x100);
+void ui_key(diag_ctx_t *ctx, int evdev, int down);
+void ui_focus_lost(diag_ctx_t *ctx);
 
-int ui_done(void);
-int ui_result(void);
-int ui_take_action(int *edge);
-const char *ui_take_copy(size_t *len);
-int ui_cursor(void);
+int ui_done(diag_ctx_t *ctx);
+int ui_result(diag_ctx_t *ctx);
+int ui_take_action(diag_ctx_t *ctx, int *edge);
+const char *ui_take_copy(diag_ctx_t *ctx, size_t *len);
+int ui_cursor(diag_ctx_t *ctx);
 
 int ui_scale_override(void);
 int ui_scale_env(void);
