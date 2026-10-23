@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 typedef enum
 {
 	DIALOG_ICON_INFO = 0,
@@ -9,10 +11,21 @@ typedef enum
 
 typedef struct pixel_s
 {
-	char R, G, B;
+	uint8_t R, G, B;
 } pixel_t;
 
 typedef struct sprite_s
+{
+	unsigned short width, height;
+	pixel_t *data;
+} sprite_t;
+
+typedef struct font_pixel_s
+{
+	unsigned char R;
+} pixel_t;
+
+typedef struct font_sprite_s
 {
 	unsigned short width, height;
 	pixel_t *data;
