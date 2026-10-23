@@ -1,0 +1,3 @@
+[submodule "vendor/qoi"]
+	path = vendor/qoi
+	url = https://github.com/phoboslab/qoi
