@@ -1,49 +1,33 @@
+#include <stdlib.h>
+#include "platform.h"
 #include "sdiag.h"
+#include "ui.h"
 
-int sdiag_show(
+#define SD_API __attribute__((visibility("default")))
+
+SD_API int sdiag_show(
 	const char *title,
 	const char *message,
 	const char **buttons,
 	int num_buttons,
 	DialogIcon icon)
 {
-	return 0;
-}
+	static const char *ok[] = {"Ok"};
+	if (!buttons || num_buttons < 1)
+	{
+		buttons = ok;
+		num_buttons = 1;
+	}
+	if (!ui_init(title, message ? message : "", buttons, num_buttons, icon))
+		return -2;
 
-pixel_t g_bg_color = {}; // 48, 64 : 1x1
-pixel_t g_bg2_color = {}; // 49, 64 : 1x1
-pixel_t g_text_color = {}; // 50, 64 : 1x1
-pixel_t g_bg_sel_color = {}; // 51, 64 : 1x1
-pixel_t g_text_sel_color = {}; // 52, 64 : 1x1
+	int shown = 0;
+	if (getenv("WAYLAND_DISPLAY"))
+		shown = plat_run_wayland() == 0;
+	if (!shown && getenv("DISPLAY"))
+		shown = plat_run_x11() == 0;
 
-sprite_t g_spr_info;	 // 0, 0 : 64x64
-sprite_t g_spr_warning; // 64, 0 : 64x64
-sprite_t g_spr_error;	 // 128, 0 : 64x64
-
-sprite_t g_spr_close; // 0, 64 : 24x24
-
-sprite_t g_spr_emboss_tl; // 24, 64 : 12x12
-sprite_t g_spr_emboss_tr; // 36, 64 : 12x12
-sprite_t g_spr_emboss_bl; // 24, 76 : 12x12
-sprite_t g_spr_emboss_br; // 36, 76 : 12x12
-
-sprite_t g_spr_emboss_hov_tl; // 114, 64 : 12x12
-sprite_t g_spr_emboss_hov_tr; // 156, 64 : 12x12
-sprite_t g_spr_emboss_hov_bl; // 114, 76 : 12x12
-sprite_t g_spr_emboss_hov_br; // 156, 76 : 12x12
-
-sprite_t g_spr_emboss_down_tl; // 168, 64 : 12x12
-sprite_t g_spr_emboss_down_tr; // 180, 64 : 12x12
-sprite_t g_spr_emboss_down_bl; // 168, 76 : 12x12
-sprite_t g_spr_emboss_down_br; // 180, 76 : 12x12
-
-sprite_t g_spr_section_top;		  // 72, 64 : 24x24
-sprite_t g_spr_section_bottom;		  // 96, 64 : 24x24
-sprite_t g_spr_section_scroll_piece_start; // 120, 66 : 17x4
-sprite_t g_spr_section_scroll_piece_middle; // 120, 72 : 17x12
-sprite_t g_spr_section_scroll_piece_end; // 120, 84 : 17x4
-
-int init_sdiag()
-{
-	
+	int r = shown ? ui_result() : -2;
+	ui_free();
+	return r;
 }

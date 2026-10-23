@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-
 typedef enum
 {
 	DIALOG_ICON_INFO = 0,
@@ -9,34 +7,8 @@ typedef enum
 	DIALOG_ICON_ERROR
 } DialogIcon;
 
-typedef struct pixel_s
-{
-	uint8_t R, G, B;
-} pixel_t;
-
-typedef struct sprite_s
-{
-	unsigned short width, height;
-	pixel_t *data;
-} sprite_t;
-
-typedef struct font_pixel_s
-{
-	unsigned char R;
-} pixel_t;
-
-typedef struct font_sprite_s
-{
-	unsigned short width, height;
-	pixel_t *data;
-} sprite_t;
-
-typedef struct diag_ctx_s
-{
-	sprite_t title_sprite;
-	sprite_t body_sprite;
-} diag_ctx_t;
-
+/* returns the index of the pressed button, -1 if the dialog was closed (esc or the close button),
+   or -2 if it could not be shown (no display, missing libraries, etc) */
 int sdiag_show(
 	const char *title,
 	const char *message,
