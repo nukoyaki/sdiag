@@ -12,11 +12,12 @@ static const unsigned char atlas_qoi[] = {
 #embed "../resources/icons.qoi"
 };
 
-pixel_t g_bg_color;		  /* 48, 64 : 1x1 */
-pixel_t g_bg2_color;	  /* 49, 64 : 1x1 */
-pixel_t g_text_color;	  /* 50, 64 : 1x1 */
-pixel_t g_bg_sel_color;	  /* 51, 64 : 1x1 */
-pixel_t g_text_sel_color; /* 52, 64 : 1x1 */
+pixel_t g_bg_color;		   /* 48, 64 : 1x1 */
+pixel_t g_bg2_color;	   /* 49, 64 : 1x1 */
+pixel_t g_text_color;	   /* 50, 64 : 1x1 */
+pixel_t g_bg_sel_color;	   /* 51, 64 : 1x1 */
+pixel_t g_text_sel_color;  /* 52, 64 : 1x1 */
+pixel_t g_scroll_bg_color; /* 53, 64 : 1x1 */
 
 sprite_t g_spr_info;	/* 0, 0 : 64x64 */
 sprite_t g_spr_warning; /* 64, 0 : 64x64 */
@@ -84,7 +85,7 @@ static const struct
 	{&g_text_color, 50, 64},
 	{&g_bg_sel_color, 51, 64},
 	{&g_text_sel_color, 52, 64},
-};
+	{&g_scroll_bg_color, 53, 64}};
 
 static pixel_t *pool;
 

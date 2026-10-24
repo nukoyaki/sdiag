@@ -460,7 +460,10 @@ static void paint_body(diag_ctx_t *ctx, rect_t d)
 	if (ctx->scroll < ctx->maxscroll)
 		paint_fade(&ctx->paint, (rect_t){0, b.y1 - FADE_H, ctx->W, b.y1}, g_bg_color, 0);
 	if (ctx->sbar)
-		paint_scrollbar(&ctx->paint, ctx->thumb_r.x0, ctx->thumb_r.y0, ctx->thumb_r.y1 - ctx->thumb_r.y0);
+	{
+		paint_fill(&ctx->paint, (rect_t){ctx->W - (SCROLL_W + 4), b.y0, ctx->W, b.y1}, g_scroll_bg_color);
+		paint_scrollbar(&ctx->paint, ctx->thumb_r.x0 - 2, ctx->thumb_r.y0, ctx->thumb_r.y1 - ctx->thumb_r.y0);
+	}
 }
 
 static void paint_bottom(diag_ctx_t *ctx, rect_t d)
@@ -777,12 +780,10 @@ void ui_key(diag_ctx_t *ctx, int k, int down)
 		finish(ctx, ctx->focus);
 		break;
 	case 105:
-		if (ctx->focus < ctx->nbtn - 1)
-			set_focus(ctx, ctx->focus + 1);
+		set_focus(ctx, (ctx->focus + 1) % ctx->nbtn);
 		break;
 	case 106:
-		if (ctx->focus > 0)
-			set_focus(ctx, ctx->focus - 1);
+		set_focus(ctx, (ctx->focus + ctx->nbtn - 1) % ctx->nbtn);
 		break;
 	case 15:
 		set_focus(ctx, ctx->shift ? (ctx->focus + ctx->nbtn - 1) % ctx->nbtn : (ctx->focus + 1) % ctx->nbtn);

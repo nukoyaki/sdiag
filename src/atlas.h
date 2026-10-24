@@ -1,7 +1,7 @@
 #pragma once
 #include "types.h"
 
-extern pixel_t g_bg_color, g_bg2_color, g_text_color, g_bg_sel_color, g_text_sel_color;
+extern pixel_t g_bg_color, g_bg2_color, g_text_color, g_bg_sel_color, g_text_sel_color, g_scroll_bg_color;
 
 extern sprite_t g_spr_info, g_spr_warning, g_spr_error;
 extern sprite_t g_spr_close;

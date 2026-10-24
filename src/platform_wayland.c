@@ -1,9 +1,12 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #define wl_proxy_marshal_flags sd_wl_proxy_marshal_flags
@@ -28,6 +31,11 @@ static struct
 	int (*display_dispatch)(struct wl_display *);
 	int (*display_roundtrip)(struct wl_display *);
 	int (*display_flush)(struct wl_display *);
+	int (*display_get_fd)(struct wl_display *);
+	int (*display_prepare_read)(struct wl_display *);
+	int (*display_read_events)(struct wl_display *);
+	void (*display_cancel_read)(struct wl_display *);
+	int (*display_dispatch_pending)(struct wl_display *);
 	struct wl_proxy *(*marshal_array_flags)(struct wl_proxy *, uint32_t, const struct wl_interface *, uint32_t, uint32_t, union wl_argument *);
 	int (*add_listener)(struct wl_proxy *, void (**)(void), void *);
 	void (*destroy)(struct wl_proxy *);
@@ -49,6 +57,11 @@ static int load(void)
 	F(display_dispatch, "wl_display_dispatch")
 	F(display_roundtrip, "wl_display_roundtrip")
 	F(display_flush, "wl_display_flush")
+	F(display_get_fd, "wl_display_get_fd")
+	F(display_prepare_read, "wl_display_prepare_read")
+	F(display_read_events, "wl_display_read_events")
+	F(display_cancel_read, "wl_display_cancel_read")
+	F(display_dispatch_pending, "wl_display_dispatch_pending")
 	F(marshal_array_flags, "wl_proxy_marshal_array_flags")
 	F(add_listener, "wl_proxy_add_listener")
 	F(destroy, "wl_proxy_destroy")
@@ -140,11 +153,22 @@ typedef struct way_s
 
 	int S, scale_locked, configured, force, cfg_h, last_cur;
 	uint32_t enter_serial, btn_serial, key_serial;
+	/* wayland leaves key repeat to the client, rep_key is the held key (0 if none) and rep_next when it fires next */
+	uint32_t rep_key;
+	int rep_rate, rep_delay;
+	long long rep_next;
 	char *clip;
 	size_t cliplen;
 } way_t;
 
 static int loaded;
+
+static long long now_ms(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1000LL + t.tv_nsec / 1000000;
+}
 
 static void set_limits(way_t *st)
 {
@@ -303,6 +327,7 @@ static void k_leave(void *d, struct wl_keyboard *k, uint32_t s, struct wl_surfac
 	(void)k;
 	(void)s;
 	(void)sf;
+	st->rep_key = 0;
 	ui_focus_lost(st->ctx);
 }
 static void k_key(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t t, uint32_t key, uint32_t state)
@@ -311,7 +336,17 @@ static void k_key(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t t, u
 	(void)k;
 	(void)t;
 	st->key_serial = serial;
-	ui_key(st->ctx, (int)key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
+	int down = state == WL_KEYBOARD_KEY_STATE_PRESSED;
+	/* modifiers (ctrl, shift, alt, super) don't repeat, and a new press takes over from the held key */
+	int mod = key == 29 || key == 97 || key == 42 || key == 54 || key == 56 || key == 100 || key == 125 || key == 126;
+	if (down && !mod && st->rep_rate > 0)
+	{
+		st->rep_key = key;
+		st->rep_next = now_ms() + st->rep_delay;
+	}
+	else if (!down && key == st->rep_key)
+		st->rep_key = 0;
+	ui_key(st->ctx, (int)key, down);
 }
 static void k_mods(void *d, struct wl_keyboard *k, uint32_t s, uint32_t a, uint32_t b, uint32_t c, uint32_t g)
 {
@@ -323,7 +358,16 @@ static void k_mods(void *d, struct wl_keyboard *k, uint32_t s, uint32_t a, uint3
 	(void)c;
 	(void)g;
 }
-static const struct wl_keyboard_listener kbd_l = {.keymap = k_keymap, .enter = k_enter, .leave = k_leave, .key = k_key, .modifiers = k_mods};
+static void k_repeat(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay)
+{
+	way_t *st = d;
+	(void)k;
+	st->rep_rate = rate;
+	st->rep_delay = delay;
+	if (rate <= 0)
+		st->rep_key = 0;
+}
+static const struct wl_keyboard_listener kbd_l = {.keymap = k_keymap, .enter = k_enter, .leave = k_leave, .key = k_key, .modifiers = k_mods, .repeat_info = k_repeat};
 
 static void seat_caps(void *d, struct wl_seat *s, uint32_t caps)
 {
@@ -357,7 +401,7 @@ static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char
 	}
 	else if (!strcmp(iface, wl_seat_interface.name) && !st->seat)
 	{
-		st->seat = wl_registry_bind(r, name, &wl_seat_interface, 1);
+		st->seat = wl_registry_bind(r, name, &wl_seat_interface, ver < 4 ? ver : 4);
 		wl_seat_add_listener(st->seat, &seat_l, st);
 	}
 	else if (!strcmp(iface, wl_data_device_manager_interface.name))
@@ -585,11 +629,46 @@ int plat_load_wayland(void)
 	return loaded = load();
 }
 
+static int pump(way_t *st)
+{
+	while (wl.display_prepare_read(st->dpy) != 0)
+		if (wl.display_dispatch_pending(st->dpy) == -1)
+			return -1;
+	wl.display_flush(st->dpy);
+	int timeout = -1;
+	if (st->rep_key)
+	{
+		long long left = st->rep_next - now_ms();
+		timeout = left < 0 ? 0 : (int)left;
+	}
+	struct pollfd p = {.fd = wl.display_get_fd(st->dpy), .events = POLLIN};
+	int r = poll(&p, 1, timeout);
+	if (r > 0)
+	{
+		if (wl.display_read_events(st->dpy) == -1)
+			return -1;
+	}
+	else
+	{
+		wl.display_cancel_read(st->dpy);
+		if (r < 0 && errno != EINTR)
+			return -1;
+	}
+	if (wl.display_dispatch_pending(st->dpy) == -1)
+		return -1;
+	if (st->rep_key && now_ms() >= st->rep_next)
+	{
+		ui_key(st->ctx, (int)st->rep_key, 1);
+		st->rep_next = now_ms() + 1000 / st->rep_rate;
+	}
+	return 0;
+}
+
 int plat_run_wayland(diag_ctx_t *ctx)
 {
 	if (!loaded)
 		return 1;
-	way_t s = {.ctx = ctx, .S = 120, .last_cur = -1}, *st = &s;
+	way_t s = {.ctx = ctx, .S = 120, .last_cur = -1, .rep_rate = 25, .rep_delay = 600}, *st = &s;
 	st->dpy = wl.display_connect(NULL);
 	if (!st->dpy)
 		return 1;
@@ -638,7 +717,7 @@ int plat_run_wayland(diag_ctx_t *ctx)
 
 	st->force = 1;
 	draw(st);
-	while (!ui_done(st->ctx) && wl.display_dispatch(st->dpy) != -1)
+	while (!ui_done(st->ctx) && pump(st) != -1)
 		post(st);
 
 	teardown(st);
