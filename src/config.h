@@ -29,8 +29,8 @@
 #define BTN_GAP 19
 #define BTN_MARGIN 6 /* from the window edge, both sides */
 
-#define WIN_MIN_W 300
-#define WIN_MAX_W 500 /* the width is decided once, between these two, and then stays fixed */
+#define WIN_MIN_W 500
+#define WIN_MAX_W 800 /* the width is decided once, between these two, and then stays fixed */
 #define WIN_MIN_H 176
 #define WIN_MAX_H 900
 #define INIT_MAX_H 333 /* initial height cap, the window can be resized taller by hand */
